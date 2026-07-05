@@ -533,6 +533,1039 @@ if(keyword){
 
 const modal = document.getElementById('modal');
 const modalBody = document.getElementById('modalBody');
+let currentGame = null;
+
+function closeModal(){
+  if(currentGame === 'mario'){
+    // Emscripten/WASM instances can't be cleanly torn down and restarted
+    // in-page, so a full reload is the only reliable way to guarantee
+    // "closing ends it, reopening relaunches from the beginning".
+    location.reload();
+    return;
+  }
+  modal.classList.add('hidden');
+  modalBody.innerHTML = '';
+  currentGame = null;
+}
+modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
+document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeModal(); });
+
+function openGame(which){
+  if(document.activeElement) document.activeElement.blur();
+  modal.classList.remove('hidden');
+  currentGame = which;
+  if(which === 'ttt') renderTTT();
+  else if(which === 'c4') renderC4();
+  else if(which === 'mario') renderMario();
+
+  const box = document.querySelector('.modal-box');
+  if(box) box.classList.toggle('wide', which === 'mario');
+
+  if(which === 'mario'){
+    const canvas = document.getElementById('canvas');
+    if(canvas) canvas.focus();
+  } else {
+    if(box) box.focus();
+  }
+}
+
+let tttBoard, tttOver, tttScore = {w:0,l:0,d:0};
+
+function renderTTT(){
+  tttBoard = Array(9).fill('');
+  tttOver = false;
+  modalBody.innerHTML = `
+    <h3 class="modal-title">Tic-Tac-Toe</h3>
+    <p class="modal-sub">You're X. The AI plays perfectly — a draw is a good result.</p>
+    <div class="scoreline">Wins: <b id="tttW">${tttScore.w}</b> &nbsp; Losses: <b id="tttL">${tttScore.l}</b> &nbsp; Draws: <b id="tttD">${tttScore.d}</b></div>
+    <div class="ttt-board" id="tttBoard"></div>
+    <div class="status-line" id="tttStatus"></div>
+    <div style="margin-top:12px;"><button class="btn" onclick="renderTTT()">New Game</button></div>
+  `;
+  const boardEl = document.getElementById('tttBoard');
+  boardEl.innerHTML = '';
+  for(let i=0;i<9;i++){
+    const cell = document.createElement('div');
+    cell.className = 'ttt-cell';
+    cell.dataset.i = i;
+    cell.onclick = ()=>tttPlayerMove(i);
+    boardEl.appendChild(cell);
+  }
+}
+
+function tttPlayerMove(i){
+  if(tttOver || tttBoard[i]) return;
+  tttBoard[i] = 'X';
+  tttDraw();
+  if(tttCheckEnd()) return;
+  setTimeout(()=>{
+    const move = tttBestMove();
+    if(move !== -1){
+      tttBoard[move] = 'O';
+      tttDraw();
+      tttCheckEnd();
+    }
+  }, 200);
+}
+
+function tttDraw(){
+  document.querySelectorAll('#tttBoard .ttt-cell').forEach(cell=>{
+    const v = tttBoard[cell.dataset.i];
+    cell.textContent = v;
+    cell.classList.toggle('x', v === 'X');
+    cell.classList.toggle('o', v === 'O');
+  });
+}
+
+const TTT_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+
+function tttWinner(b){
+  for(const [a,c,d] of TTT_LINES){
+    if(b[a] && b[a]===b[c] && b[a]===b[d]) return b[a];
+  }
+  if(b.every(v=>v)) return 'draw';
+  return null;
+}
+
+function tttCheckEnd(){
+  const w = tttWinner(tttBoard);
+  if(!w) return false;
+  tttOver = true;
+  const statusEl = document.getElementById('tttStatus');
+  if(w === 'draw'){ tttScore.d++; statusEl.textContent = "It's a draw."; statusEl.style.color = '#64748b'; }
+  else if(w === 'X'){ tttScore.w++; statusEl.textContent = 'You won! (nice — the AI made room for that only if forced)'; statusEl.style.color = '#157a3d'; }
+  else { tttScore.l++; statusEl.textContent = 'AI wins.'; statusEl.style.color = '#c0271b'; }
+  document.getElementById('tttW').textContent = tttScore.w;
+  document.getElementById('tttL').textContent = tttScore.l;
+  document.getElementById('tttD').textContent = tttScore.d;
+  return true;
+}
+
+function tttMinimax(b, depth, isMax){
+  const w = tttWinner(b);
+  if(w === 'O') return 10 - depth;
+  if(w === 'X') return depth - 10;
+  if(w === 'draw') return 0;
+
+  if(isMax){
+    let best = -Infinity;
+    for(let i=0;i<9;i++){
+      if(!b[i]){
+        b[i] = 'O';
+        best = Math.max(best, tttMinimax(b, depth+1, false));
+        b[i] = '';
+      }
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for(let i=0;i<9;i++){
+      if(!b[i]){
+        b[i] = 'X';
+        best = Math.min(best, tttMinimax(b, depth+1, true));
+        b[i] = '';
+      }
+    }
+    return best;
+  }
+}
+
+function tttBestMove(){
+  let bestScore = -Infinity, move = -1;
+  for(let i=0;i<9;i++){
+    if(!tttBoard[i]){
+      tttBoard[i] = 'O';
+      const score = tttMinimax(tttBoard, 0, false);
+      tttBoard[i] = '';
+      if(score > bestScore){ bestScore = score; move = i; }
+    }
+  }
+  return move;
+}
+
+const C4_ROWS = 6, C4_COLS = 7;
+let c4Grid, c4Over, c4Score = {w:0,l:0,d:0};
+
+function c4NewGrid(){
+  return Array.from({length:C4_ROWS}, ()=>Array(C4_COLS).fill(0));
+}
+
+function renderC4(){
+  c4Grid = c4NewGrid();
+  c4Over = false;
+  modalBody.innerHTML = `
+    <h3 class="modal-title">Connect 4</h3>
+    <p class="modal-sub">You're red, drop first. AI is yellow.</p>
+    <div class="scoreline">Wins: <b id="c4W">${c4Score.w}</b> &nbsp; Losses: <b id="c4L">${c4Score.l}</b> &nbsp; Draws: <b id="c4D">${c4Score.d}</b></div>
+    <div class="c4-wrap">
+      <div class="c4-cols" id="c4Cols"></div>
+      <div class="c4-board" id="c4Board"></div>
+    </div>
+    <div class="status-line" id="c4Status"></div>
+    <div style="margin-top:12px;"><button class="btn" onclick="renderC4()">New Game</button></div>
+  `;
+  const colsEl = document.getElementById('c4Cols');
+  colsEl.innerHTML = '';
+  for(let c=0;c<C4_COLS;c++){
+    const b = document.createElement('button');
+    b.className = 'c4-colbtn';
+    b.textContent = '\u2193';
+    b.onclick = ()=>c4PlayerMove(c);
+    colsEl.appendChild(b);
+  }
+  c4Draw();
+}
+
+function c4Draw(){
+  const boardEl = document.getElementById('c4Board');
+  boardEl.innerHTML = '';
+  for(let r=0;r<C4_ROWS;r++){
+    for(let c=0;c<C4_COLS;c++){
+      const cell = document.createElement('div');
+      const v = c4Grid[r][c];
+      cell.className = 'c4-cell' + (v===1?' p1':v===2?' p2':'');
+      boardEl.appendChild(cell);
+    }
+  }
+}
+
+function c4NextOpenRow(grid, col){
+  for(let r=C4_ROWS-1;r>=0;r--){
+    if(grid[r][col]===0) return r;
+  }
+  return -1;
+}
+
+function c4Winner(grid, piece){
+  for(let r=0;r<C4_ROWS;r++)
+    for(let c=0;c<=C4_COLS-4;c++)
+      if(grid[r][c]===piece && grid[r][c+1]===piece && grid[r][c+2]===piece && grid[r][c+3]===piece) return true;
+  for(let c=0;c<C4_COLS;c++)
+    for(let r=0;r<=C4_ROWS-4;r++)
+      if(grid[r][c]===piece && grid[r+1][c]===piece && grid[r+2][c]===piece && grid[r+3][c]===piece) return true;
+  for(let r=0;r<=C4_ROWS-4;r++)
+    for(let c=0;c<=C4_COLS-4;c++)
+      if(grid[r][c]===piece && grid[r+1][c+1]===piece && grid[r+2][c+2]===piece && grid[r+3][c+3]===piece) return true;
+  for(let r=3;r<C4_ROWS;r++)
+    for(let c=0;c<=C4_COLS-4;c++)
+      if(grid[r][c]===piece && grid[r-1][c+1]===piece && grid[r-2][c+2]===piece && grid[r-3][c+3]===piece) return true;
+  return false;
+}
+
+function c4IsFull(grid){
+  return grid[0].every(v=>v!==0);
+}
+
+function c4PlayerMove(col){
+  if(c4Over) return;
+  const row = c4NextOpenRow(c4Grid, col);
+  if(row === -1) return;
+  c4Grid[row][col] = 1;
+  c4Draw();
+  if(c4CheckEnd(1)) return;
+
+  setTimeout(()=>{
+    const [aiCol] = c4BestMove(c4Grid, 5);
+    if(aiCol !== null && aiCol !== undefined){
+      const r2 = c4NextOpenRow(c4Grid, aiCol);
+      if(r2 !== -1){
+        c4Grid[r2][aiCol] = 2;
+        c4Draw();
+        c4CheckEnd(2);
+      }
+    }
+  }, 250);
+}
+
+function c4CheckEnd(lastPiece){
+  const statusEl = document.getElementById('c4Status');
+  if(c4Winner(c4Grid, lastPiece)){
+    c4Over = true;
+    if(lastPiece === 1){ c4Score.w++; statusEl.textContent = 'You win!'; statusEl.style.color = '#157a3d'; }
+    else { c4Score.l++; statusEl.textContent = 'AI wins.'; statusEl.style.color = '#c0271b'; }
+    document.getElementById('c4W').textContent = c4Score.w;
+    document.getElementById('c4L').textContent = c4Score.l;
+    document.getElementById('c4D').textContent = c4Score.d;
+    return true;
+  }
+  if(c4IsFull(c4Grid)){
+    c4Over = true;
+    c4Score.d++;
+    statusEl.textContent = "It's a draw.";
+    statusEl.style.color = '#64748b';
+    document.getElementById('c4D').textContent = c4Score.d;
+    return true;
+  }
+  return false;
+}
+
+function c4ValidCols(grid){
+  const cols = [];
+  for(let c=0;c<C4_COLS;c++) if(grid[0][c]===0) cols.push(c);
+  return cols;
+}
+
+function c4EvalWindow(window, piece){
+  const opp = piece === 2 ? 1 : 2;
+  const pieceCount = window.filter(v=>v===piece).length;
+  const emptyCount = window.filter(v=>v===0).length;
+  const oppCount = window.filter(v=>v===opp).length;
+  let score = 0;
+  if(pieceCount === 4) score += 100;
+  else if(pieceCount === 3 && emptyCount === 1) score += 5;
+  else if(pieceCount === 2 && emptyCount === 2) score += 2;
+  if(oppCount === 3 && emptyCount === 1) score -= 4;
+  return score;
+}
+
+function c4ScorePosition(grid, piece){
+  let score = 0;
+  const centerCol = Math.floor(C4_COLS/2);
+  let centerCount = 0;
+  for(let r=0;r<C4_ROWS;r++) if(grid[r][centerCol]===piece) centerCount++;
+  score += centerCount * 3;
+
+  for(let r=0;r<C4_ROWS;r++){
+    const rowArr = grid[r];
+    for(let c=0;c<=C4_COLS-4;c++){
+      score += c4EvalWindow(rowArr.slice(c,c+4), piece);
+    }
+  }
+  for(let c=0;c<C4_COLS;c++){
+    const colArr = [];
+    for(let r=0;r<C4_ROWS;r++) colArr.push(grid[r][c]);
+    for(let r=0;r<=C4_ROWS-4;r++){
+      score += c4EvalWindow(colArr.slice(r,r+4), piece);
+    }
+  }
+  for(let r=0;r<=C4_ROWS-4;r++){
+    for(let c=0;c<=C4_COLS-4;c++){
+      const w = [grid[r][c], grid[r+1][c+1], grid[r+2][c+2], grid[r+3][c+3]];
+      score += c4EvalWindow(w, piece);
+    }
+  }
+  for(let r=3;r<C4_ROWS;r++){
+    for(let c=0;c<=C4_COLS-4;c++){
+      const w = [grid[r][c], grid[r-1][c+1], grid[r-2][c+2], grid[r-3][c+3]];
+      score += c4EvalWindow(w, piece);
+    }
+  }
+  return score;
+}
+
+function c4IsTerminal(grid){
+  return c4Winner(grid,1) || c4Winner(grid,2) || c4ValidCols(grid).length===0;
+}
+
+function c4Minimax(grid, depth, alpha, beta, maximizing){
+  const validCols = c4ValidCols(grid);
+  const terminal = c4IsTerminal(grid);
+
+  if(depth === 0 || terminal){
+    if(terminal){
+      if(c4Winner(grid,2)) return [null, 1000000];
+      if(c4Winner(grid,1)) return [null, -1000000];
+      return [null, 0];
+    }
+    return [null, c4ScorePosition(grid, 2)];
+  }
+
+  if(maximizing){
+    let value = -Infinity;
+    let column = validCols[Math.floor(Math.random()*validCols.length)];
+    for(const col of validCols){
+      const row = c4NextOpenRow(grid, col);
+      grid[row][col] = 2;
+      const newScore = c4Minimax(grid, depth-1, alpha, beta, false)[1];
+      grid[row][col] = 0;
+      if(newScore > value){ value = newScore; column = col; }
+      alpha = Math.max(alpha, value);
+      if(alpha >= beta) break;
+    }
+    return [column, value];
+  } else {
+    let value = Infinity;
+    let column = validCols[Math.floor(Math.random()*validCols.length)];
+    for(const col of validCols){
+      const row = c4NextOpenRow(grid, col);
+      grid[row][col] = 1;
+      const newScore = c4Minimax(grid, depth-1, alpha, beta, true)[1];
+      grid[row][col] = 0;
+      if(newScore < value){ value = newScore; column = col; }
+      beta = Math.min(beta, value);
+      if(alpha >= beta) break;
+    }
+    return [column, value];
+  }
+}
+
+function c4BestMove(grid, depth){
+  return c4Minimax(grid, depth, -Infinity, Infinity, true);
+}
+
+let marioLoaded = false;
+
+function renderMario(){
+  modalBody.innerHTML = `
+    <h3 class="modal-title">Super Mario 64</h3>
+    <p class="modal-sub">Local build. Click inside the game canvas to give it keyboard focus.</p>
+    <div class="mario-layout">
+      <div class="mario-frame-wrap">
+        <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+        <div id="marioLoadStatus" class="mario-fallback">Loading sm64.js…</div>
+        <div class="volume-row">
+          <span>&#128266;</span>
+          <input type="range" id="marioVolume" min="0" max="100" value="80">
+          <span id="marioVolumeVal">80%</span>
+        </div>
+      </div>
+      <div class="controls-panel">
+        <h4>Movement &amp; Actions</h4>
+        <ul>
+          <li><span class="action">Move Mario</span><span class="key">Arrow Keys</span></li>
+          <li><span class="action">Jump (A)</span><span class="key">X</span></li>
+          <li><span class="action">Punch / Dive (B)</span><span class="key">C</span></li>
+          <li><span class="action">Crouch / Ground Pound (Z)</span><span class="key">Z</span></li>
+          <li><span class="action">First-Person Cam (R)</span><span class="key">S</span></li>
+          <li><span class="action">Crawl / Hold Cam (L)</span><span class="key">A</span></li>
+        </ul>
+        <h4>Camera (C-Buttons)</h4>
+        <ul>
+          <li><span class="action">Look Up</span><span class="key">Home</span></li>
+          <li><span class="action">Look Down</span><span class="key">End</span></li>
+          <li><span class="action">Look Left</span><span class="key">Delete</span></li>
+          <li><span class="action">Look Right</span><span class="key">Page Down</span></li>
+        </ul>
+        <h4>System &amp; D-Pad</h4>
+        <ul>
+          <li><span class="action">Pause / Start</span><span class="key">Enter</span></li>
+          <li><span class="action">Toggle Camera Mode</span><span class="key">R.Shift</span></li>
+          <li><span class="action">D-Pad</span><span class="key">W A S D</span></li>
+        </ul>
+      </div>
+    </div>
+  `;
+
+  loadMarioGame();
+}
+
+function loadMarioGame(){
+  const statusEl = document.getElementById('marioLoadStatus');
+  const canvas = document.getElementById('canvas');
+
+  // Emscripten-style module config. sm64.js (from an Emscripten build)
+  // typically reads window.Module and attaches itself to the canvas below.
+  window.Module = window.Module || {};
+  window.Module.canvas = canvas;
+  window.Module.print = (function(){
+    return function(text){ console.log('[sm64]', text); };
+  })();
+  window.Module.printErr = function(text){ console.error('[sm64]', text); };
+  window.Module.setStatus = function(text){
+    if(statusEl) statusEl.textContent = text || 'Running.';
+  };
+  window.Module.onRuntimeInitialized = function(){
+    if(statusEl) statusEl.textContent = 'Running.';
+    marioLoaded = true;
+  };
+
+  if(marioLoaded){
+    // Already initialized once this page session — most Emscripten builds
+    // can't be cleanly re-initialized into a fresh canvas without a reload.
+    if(statusEl) statusEl.textContent = 'Already running from earlier — reopen the page for a clean restart if the screen is blank.';
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = './sm64.js';
+  script.onerror = function(){
+    if(statusEl) statusEl.textContent = 'Could not find ./sm64.js next to this HTML file. Check the path/filename.';
+  };
+  document.body.appendChild(script);
+
+  const volSlider = document.getElementById('marioVolume');
+  const volLabel = document.getElementById('marioVolumeVal');
+  if(volSlider){
+    volSlider.addEventListener('input', ()=>{
+      const pct = Number(volSlider.value);
+      if(volLabel) volLabel.textContent = pct + '%';
+      applyMarioVolume(pct / 100);
+    });
+    // apply the default once audio is likely up
+    applyMarioVolume(Number(volSlider.value) / 100);
+  }
+}
+
+function applyMarioVolume(vol){
+  // vol is 0.0 - 1.0. Different Emscripten/SDL builds expose audio
+  // differently, so we try the common ones and fall back gracefully.
+  let applied = false;
+
+  // 1) A build-specific helper, if sm64.js defines one.
+  if(window.Module && typeof window.Module.setVolume === 'function'){
+    try{ window.Module.setVolume(vol); applied = true; }catch(e){}
+  }
+
+  // 2) SDL2 builds sometimes expose their WebAudio context/gain node.
+  if(!applied && window.Module){
+    const ctxCandidates = [window.Module.SDL2audioContext, window.Module.audioContext, window.SDL2 && window.SDL2.audioContext];
+    for(const ctx of ctxCandidates){
+      if(ctx && ctx.gainNode){
+        try{ ctx.gainNode.gain.value = vol; applied = true; break; }catch(e){}
+      }
+    }
+  }
+
+  // 3) Fallback: any <audio>/<video> elements the build may have created.
+  if(!applied){
+    const mediaEls = document.querySelectorAll('audio, video');
+    if(mediaEls.length){
+      mediaEls.forEach(el => { el.volume = vol; });
+      applied = true;
+    }
+  }
+
+  if(!applied){
+    console.warn('[sm64] No known audio hook found for volume control — tell Claude the actual API sm64.js exposes (e.g. window.Module.xyz) and this can be wired up properly.');
+  }
+}
+</script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title id="pageTitle">Access Denied</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #e9edf3;
+    --paper: #ffffff;
+    --navy: #0d1526;
+    --navy-2: #16213a;
+    --line: #d7dde6;
+    --text: #0f172a;
+    --muted: #64748b;
+    --danger: #c0271b;
+    --danger-dim: #f4d9d6;
+    --ok: #157a3d;
+    --ok-dim: #d9ecdf;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  html,body{
+    background: var(--bg);
+    font-family: var(--sans);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  a{color:inherit;}
+
+  .topbar{
+    background: linear-gradient(180deg, var(--navy) 0%, var(--navy-2) 100%);
+    color: #cfd8e8;
+    padding: 10px 20px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size: 13px;
+    letter-spacing:.02em;
+    border-bottom: 3px solid var(--danger);
+  }
+  .topbar .brand{
+    font-weight:700;
+    color:#fff;
+    letter-spacing:.03em;
+  }
+  .topbar .tagline{ color:#8b97ad; font-size:12px; }
+  .topbar .status{
+    margin-left:auto;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-family: var(--mono);
+    font-size:11px;
+    color:#9ae6b4;
+  }
+  .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:#22c55e;
+    box-shadow:0 0 0 0 rgba(34,197,94,.6);
+    animation: pulse 1.8s infinite;
+  }
+  @keyframes pulse{
+    0%{ box-shadow:0 0 0 0 rgba(34,197,94,.55); }
+    70%{ box-shadow:0 0 0 7px rgba(34,197,94,0); }
+    100%{ box-shadow:0 0 0 0 rgba(34,197,94,0); }
+  }
+
+  .page{
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 18px 70px;
+  }
+
+  .card{
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 10px 30px rgba(15,23,42,.06);
+    position: relative;
+    overflow: hidden;
+    padding: 34px 34px 26px;
+  }
+  .card::before{
+    content:"";
+    position:absolute; top:0; left:0; right:0; height:5px;
+    background: var(--danger);
+  }
+  .doc-id{
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing:.05em;
+    margin-bottom: 18px;
+  }
+  .head-row{
+    display:flex;
+    align-items:flex-start;
+    gap:16px;
+  }
+  .icon-badge{
+    flex: none;
+    width:46px;height:46px;
+    border-radius:50%;
+    background: var(--danger-dim);
+    color: var(--danger);
+    display:flex;align-items:center;justify-content:center;
+    font-size:22px;
+    border: 1px solid #ecb8b2;
+  }
+  h1{
+    margin: 2px 0 4px;
+    font-size: 23px;
+    letter-spacing:-.01em;
+  }
+  .subtitle{
+    margin:0;
+    color: var(--muted);
+    font-size: 14.5px;
+    line-height:1.5;
+  }
+
+  .stamp{
+    position:absolute;
+    top: 54px;
+    right: 34px;
+    border: 3px solid var(--danger);
+    color: var(--danger);
+    font-family: var(--mono);
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    font-size: 13px;
+    padding: 6px 12px;
+    transform: rotate(-9deg);
+    border-radius:3px;
+    mix-blend-mode: multiply;
+    opacity:.85;
+    pointer-events:none;
+  }
+
+  .details{
+    margin-top: 26px;
+    border-top: 1px dashed var(--line);
+    padding-top: 18px;
+  }
+  .drow{
+    display:flex;
+    justify-content:space-between;
+    gap: 12px;
+    padding: 7px 0;
+    font-size: 13.5px;
+  }
+  .drow .k{ color: var(--muted); }
+  .drow .v{
+    font-family: var(--mono);
+    font-weight:600;
+    text-align:right;
+    word-break: break-word;
+  }
+  .drow .v.flag{ color: var(--danger); }
+
+  .footnote{
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height:1.6;
+  }
+
+  .games{
+    margin-top: 34px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 30px 34px 32px;
+    position: relative;
+    overflow:hidden;
+  }
+  .games::before{
+    content:"";
+    position:absolute; top:0; left:0; right:0; height:5px;
+    background: var(--ok);
+  }
+  .games-head{ display:flex; align-items:flex-start; gap:16px; }
+  .icon-badge.ok{ background: var(--ok-dim); color: var(--ok); border-color:#bfe3cc; }
+  .games h2{
+    margin:2px 0 4px;
+    font-size:19px;
+  }
+  .games p{
+    margin:0;
+    color:var(--muted);
+    font-size:14px;
+  }
+  .stamp.ok{
+    border-color: var(--ok);
+    color: var(--ok);
+    top: 30px;
+  }
+
+  .grid{
+    margin-top: 22px;
+    display:grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  @media (max-width:620px){ .grid{ grid-template-columns: 1fr; } }
+
+  .gcard{
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:16px;
+    cursor:pointer;
+    background:#fbfcfe;
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+    text-align:left;
+  }
+  .gcard:hover, .gcard:focus-visible{
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15,23,42,.08);
+    border-color:#b9c4d4;
+    outline:none;
+  }
+  .gcard .emoji{ font-size:26px; }
+  .gcard .title{ font-weight:700; margin-top:8px; font-size:14.5px; }
+  .gcard .desc{ color:var(--muted); font-size:12.5px; margin-top:3px; }
+  .gcard .tag{
+    display:inline-block;
+    margin-top:10px;
+    font-family: var(--mono);
+    font-size:10.5px;
+    letter-spacing:.05em;
+    color: var(--ok);
+    background: var(--ok-dim);
+    padding:2px 7px;
+    border-radius:3px;
+  }
+
+  .modal{
+    position:fixed; inset:0;
+    background: rgba(13,21,38,.55);
+    display:flex; align-items:center; justify-content:center;
+    padding: 20px;
+    z-index: 50;
+  }
+  .modal.hidden{ display:none; }
+  .modal-box{
+    background:#fff;
+    border-radius:8px;
+    width:100%;
+    max-width: 620px;
+    max-height: 92vh;
+    overflow:auto;
+    position:relative;
+    padding: 22px 22px 26px;
+    box-shadow: 0 30px 80px rgba(0,0,0,.35);
+  }
+  .modal-box.wide{ max-width: 900px; }
+  .modal-close{
+    position:absolute; top:10px; right:12px;
+    border:none; background:transparent;
+    font-size:22px; line-height:1; cursor:pointer;
+    color: var(--muted);
+    padding:6px 10px;
+    border-radius:6px;
+  }
+  .modal-close:hover{ background:#f1f5f9; color:var(--text); }
+  .modal-title{ margin: 0 0 4px; font-size:18px; padding-right:30px;}
+  .modal-sub{ margin:0 0 16px; color:var(--muted); font-size:13px;}
+
+  .scoreline{
+    display:flex; gap:14px; font-family:var(--mono); font-size:12.5px; color:var(--muted); margin-bottom:14px; flex-wrap:wrap;
+  }
+  .scoreline b{ color:var(--text); }
+  .btn{
+    font-family: var(--sans);
+    font-weight:600;
+    font-size:13px;
+    border:1px solid var(--line);
+    background:#fff;
+    padding:8px 14px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  .btn:hover{ background:#f8fafc; }
+  .status-line{
+    margin-top:14px;
+    font-size:13.5px;
+    font-weight:600;
+    min-height: 20px;
+  }
+
+  .ttt-board{
+    display:grid;
+    grid-template-columns: repeat(3, 84px);
+    grid-template-rows: repeat(3, 84px);
+    gap:6px;
+    justify-content:center;
+    margin: 4px auto 0;
+  }
+  .ttt-cell{
+    background:#f1f5f9;
+    border:1px solid var(--line);
+    border-radius:6px;
+    font-size:34px;
+    font-weight:800;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+    user-select:none;
+  }
+  .ttt-cell:hover{ background:#e8eef5; }
+  .ttt-cell.x{ color:#2563eb; }
+  .ttt-cell.o{ color: var(--danger); }
+
+  .c4-wrap{ display:flex; flex-direction:column; align-items:center; gap:8px; margin-top:4px; }
+  .c4-cols{ display:flex; gap:4px; }
+  .c4-colbtn{
+    width:46px; height:24px;
+    border:1px solid var(--line);
+    background:#f8fafc;
+    border-radius:4px;
+    cursor:pointer;
+    font-size:12px;
+  }
+  .c4-colbtn:hover{ background:#eef2f7; }
+  .c4-board{
+    background:#1d4ed8;
+    padding:6px;
+    border-radius:8px;
+    display:grid;
+    grid-template-columns: repeat(7, 46px);
+    grid-gap:4px;
+  }
+  .c4-cell{
+    width:46px;height:46px;border-radius:50%;
+    background:#0f2f9e;
+  }
+  .c4-cell.p1{ background: var(--danger); }
+  .c4-cell.p2{ background:#eab308; }
+
+  .mario-layout{
+    display:flex;
+    gap:18px;
+    flex-wrap:wrap;
+    margin-top:6px;
+  }
+  .mario-frame-wrap{ flex: 1 1 400px; margin-top:0; }
+  .mario-frame-wrap iframe,
+  .mario-frame-wrap canvas{
+    width:100%;
+    aspect-ratio: 4/3;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#000;
+    display:block;
+  }
+  .controls-panel{
+    flex: 0 0 220px;
+    font-size:12px;
+    color:var(--text);
+  }
+  .controls-panel h4{
+    margin: 0 0 6px;
+    font-size:12.5px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    color: var(--muted);
+    border-bottom:1px solid var(--line);
+    padding-bottom:4px;
+  }
+  .controls-panel h4:not(:first-child){ margin-top:16px; }
+  .controls-panel ul{ margin:0; padding-left:0; list-style:none; }
+  .controls-panel li{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:8px;
+    padding:4px 0;
+    line-height:1.3;
+  }
+  .controls-panel .action{ color:var(--text); }
+  .key{
+    font-family: var(--mono);
+    background:#eef2f7;
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:1px 7px;
+    font-size:11px;
+    white-space:nowrap;
+    flex:none;
+  }
+  .mario-fallback{ font-size:12.5px; color:var(--muted); margin-top:10px; }
+  .volume-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-top:10px;
+    font-size:13px;
+  }
+  .volume-row input[type="range"]{ flex:1; }
+  .volume-row #marioVolumeVal{
+    font-family: var(--mono);
+    font-size:11.5px;
+    color: var(--muted);
+    width: 36px;
+    text-align:right;
+  }
+  #marioUI canvas{
+    width:100%;
+    aspect-ratio: 4/3;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#000;
+    display:block;
+  }
+
+  .brand-footer{
+    text-align:center;
+    color:#94a3b8;
+    font-size:11.5px;
+    margin-top:26px;
+    font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span class="brand">SentriWall</span>
+    <span class="tagline">Network Content Policy Enforcement</span>
+    <span class="status"><span class="dot"></span>POLICY ENGINE ACTIVE</span>
+  </div>
+
+  <div class="page">
+
+    <div class="card" id="blockCard">
+      <div class="stamp">Access Denied</div>
+      <div class="doc-id">FILTER REPORT — GENERATED CLIENT-SIDE</div>
+      <div class="head-row">
+        <div class="icon-badge">&#128274;</div>
+        <div>
+          <h1>Access Blocked: Restricted Keyword Detected</h1>
+          <p class="subtitle">The requested content matched a restricted keyword and was blocked in accordance with your network's Acceptable Use Policy.</p>
+        </div>
+      </div>
+
+      <div class="details">
+        <div class="drow"><span class="k">Blocked Keyword</span><span class="v flag" id="keywordName"></span></div>
+        <div class="drow"><span class="k">Category</span><span class="v" id="reasonName"></span></div>
+        <div class="drow"><span class="k">Status</span><span class="v flag">DENIED</span></div>
+        <div class="drow"><span class="k">Time of Request</span><span class="v" id="timeStamp"></span></div>
+        <div class="drow"><span class="k">Rule ID</span><span class="v" id="ruleId"></span></div>
+      </div>
+
+      <div class="footnote">
+        If you believe this was blocked in error, contact your network administrator.
+      </div>
+    </div>
+
+    <div class="games">
+      <div class="stamp ok">Approved</div>
+      <div class="games-head">
+        <div class="icon-badge ok">&#9989;</div>
+        <div>
+          <h2>Approved Recreational Activities</h2>
+          <p>These have not been flagged by the filter. Feel free to use them while you wait.</p>
+        </div>
+      </div>
+
+      <div class="grid">
+        <button class="gcard" onclick="openGame('ttt')">
+          <div class="emoji">&#10060;&#11093;</div>
+          <div class="title">Tic-Tac-Toe</div>
+          <div class="desc">You vs. an unbeatable AI</div>
+          <span class="tag">PLAY</span>
+        </button>
+        <button class="gcard" onclick="openGame('c4')">
+          <div class="emoji">&#128309;</div>
+          <div class="title">Connect 4</div>
+          <div class="desc">You vs. a scheming AI</div>
+          <span class="tag">PLAY</span>
+        </button>
+        <button class="gcard" onclick="openGame('mario')">
+          <div class="emoji">&#127814;</div>
+          <div class="title">Super Mario 64</div>
+          <div class="desc">Full game, embedded</div>
+          <span class="tag">PLAY</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="brand-footer">SentriWall Web Filter · Local Client v2.3 · This device only</div>
+  </div>
+
+  <div class="modal hidden" id="modal">
+    <div class="modal-box" tabindex="-1">
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const keyword = params.get('keyword') || params.get('site');
+const reason = params.get('reason') || 'Restricted Content';
+
+function randomRuleId(){
+  const num = Math.floor(100000 + Math.random()*900000);
+  const letter = String.fromCharCode(65 + Math.floor(Math.random()*26));
+  return 'SW-' + num + '-' + letter;
+}
+
+const blockCard = document.getElementById('blockCard');
+
+if(keyword){
+  document.getElementById('keywordName').textContent = keyword;
+  document.getElementById('reasonName').textContent = reason;
+  document.getElementById('pageTitle').textContent = keyword + ' Blocked — SentriWall';
+  document.getElementById('timeStamp').textContent = new Date().toLocaleString(undefined, {
+    month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'
+  });
+  document.getElementById('ruleId').textContent = params.get('rule') || randomRuleId();
+} else {
+  blockCard.style.display = 'none';
+  document.getElementById('pageTitle').textContent = 'SentriWall — Network Filter';
+}
+
+const modal = document.getElementById('modal');
+const modalBody = document.getElementById('modalBody');
 
 function closeModal(){
   modal.classList.add('hidden');
