@@ -32,6 +32,7 @@
   }
   a{color:inherit;}
 
+  /* ---------- letterhead / topbar ---------- */
   .topbar{
     background: linear-gradient(180deg, var(--navy) 0%, var(--navy-2) 100%);
     color: #cfd8e8;
@@ -76,6 +77,7 @@
     padding: 40px 18px 70px;
   }
 
+  /* ---------- the "document" card ---------- */
   .card{
     background: var(--paper);
     border: 1px solid var(--line);
@@ -173,6 +175,7 @@
     line-height:1.6;
   }
 
+  /* ---------- games section ---------- */
   .games{
     margin-top: 34px;
     background: var(--paper);
@@ -242,6 +245,7 @@
     border-radius:3px;
   }
 
+  /* ---------- modal ---------- */
   .modal{
     position:fixed; inset:0;
     background: rgba(13,21,38,.55);
@@ -296,6 +300,7 @@
     min-height: 20px;
   }
 
+  /* tic tac toe */
   .ttt-board{
     display:grid;
     grid-template-columns: repeat(3, 84px);
@@ -318,6 +323,7 @@
   .ttt-cell.x{ color:#2563eb; }
   .ttt-cell.o{ color: var(--danger); }
 
+  /* connect4 */
   .c4-wrap{ display:flex; flex-direction:column; align-items:center; gap:8px; margin-top:4px; }
   .c4-cols{ display:flex; gap:4px; }
   .c4-colbtn{
@@ -344,6 +350,7 @@
   .c4-cell.p1{ background: var(--danger); }
   .c4-cell.p2{ background:#eab308; }
 
+  /* mario */
   .mario-layout{
     display:flex;
     gap:18px;
@@ -351,14 +358,12 @@
     margin-top:6px;
   }
   .mario-frame-wrap{ flex: 1 1 400px; margin-top:0; }
-  .mario-frame-wrap iframe,
-  .mario-frame-wrap canvas{
+  .mario-frame-wrap iframe{
     width:100%;
     aspect-ratio: 4/3;
     border:1px solid var(--line);
     border-radius:6px;
     background:#000;
-    display:block;
   }
   .controls-panel{
     flex: 0 0 220px;
@@ -498,6 +503,7 @@
     <div class="brand-footer">SentriWall Web Filter · Local Client v2.3 · This device only</div>
   </div>
 
+  <!-- ================= MODAL ================= -->
   <div class="modal hidden" id="modal">
     <div class="modal-box" tabindex="-1">
       <button class="modal-close" onclick="closeModal()">&times;</button>
@@ -506,8 +512,9 @@
   </div>
 
 <script>
+/* ============ block-page details from query params ============ */
 const params = new URLSearchParams(window.location.search);
-const keyword = params.get('keyword') || params.get('site');
+const keyword = params.get('keyword') || params.get('site'); // 'site' kept only for backwards compatibility
 const reason = params.get('reason') || 'Restricted Content';
 
 function randomRuleId(){
@@ -527,25 +534,18 @@ if(keyword){
   });
   document.getElementById('ruleId').textContent = params.get('rule') || randomRuleId();
 } else {
+  // No keyword given in the URL — don't invent one, just hide the deny card.
   blockCard.style.display = 'none';
   document.getElementById('pageTitle').textContent = 'SentriWall — Network Filter';
 }
 
+/* ============ modal plumbing ============ */
 const modal = document.getElementById('modal');
 const modalBody = document.getElementById('modalBody');
-let currentGame = null;
 
 function closeModal(){
-  if(currentGame === 'mario'){
-    // Emscripten/WASM instances can't be cleanly torn down and restarted
-    // in-page, so a full reload is the only reliable way to guarantee
-    // "closing ends it, reopening relaunches from the beginning".
-    location.reload();
-    return;
-  }
   modal.classList.add('hidden');
   modalBody.innerHTML = '';
-  currentGame = null;
 }
 modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeModal(); });
@@ -553,7 +553,6 @@ document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeModal();
 function openGame(which){
   if(document.activeElement) document.activeElement.blur();
   modal.classList.remove('hidden');
-  currentGame = which;
   if(which === 'ttt') renderTTT();
   else if(which === 'c4') renderC4();
   else if(which === 'mario') renderMario();
@@ -562,13 +561,17 @@ function openGame(which){
   if(box) box.classList.toggle('wide', which === 'mario');
 
   if(which === 'mario'){
-    const canvas = document.getElementById('canvas');
-    if(canvas) canvas.focus();
+    // Focus the iframe itself so keys go straight to the game, not the page behind it.
+    const frame = document.getElementById('marioFrame');
+    if(frame) frame.focus();
   } else {
     if(box) box.focus();
   }
 }
 
+/* =========================================================
+   TIC TAC TOE  (perfect-play minimax AI)
+   ========================================================= */
 let tttBoard, tttOver, tttScore = {w:0,l:0,d:0};
 
 function renderTTT(){
@@ -683,6 +686,9 @@ function tttBestMove(){
   return move;
 }
 
+/* =========================================================
+   CONNECT 4  (alpha-beta minimax AI, depth 5)
+   ========================================================= */
 const C4_ROWS = 6, C4_COLS = 7;
 let c4Grid, c4Over, c4Score = {w:0,l:0,d:0};
 
@@ -737,15 +743,19 @@ function c4NextOpenRow(grid, col){
 }
 
 function c4Winner(grid, piece){
+  // horizontal
   for(let r=0;r<C4_ROWS;r++)
     for(let c=0;c<=C4_COLS-4;c++)
       if(grid[r][c]===piece && grid[r][c+1]===piece && grid[r][c+2]===piece && grid[r][c+3]===piece) return true;
+  // vertical
   for(let c=0;c<C4_COLS;c++)
     for(let r=0;r<=C4_ROWS-4;r++)
       if(grid[r][c]===piece && grid[r+1][c]===piece && grid[r+2][c]===piece && grid[r+3][c]===piece) return true;
+  // diag down-right
   for(let r=0;r<=C4_ROWS-4;r++)
     for(let c=0;c<=C4_COLS-4;c++)
       if(grid[r][c]===piece && grid[r+1][c+1]===piece && grid[r+2][c+2]===piece && grid[r+3][c+3]===piece) return true;
+  // diag up-right
   for(let r=3;r<C4_ROWS;r++)
     for(let c=0;c<=C4_COLS-4;c++)
       if(grid[r][c]===piece && grid[r-1][c+1]===piece && grid[r-2][c+2]===piece && grid[r-3][c+3]===piece) return true;
@@ -820,17 +830,20 @@ function c4EvalWindow(window, piece){
 
 function c4ScorePosition(grid, piece){
   let score = 0;
+  // center preference
   const centerCol = Math.floor(C4_COLS/2);
   let centerCount = 0;
   for(let r=0;r<C4_ROWS;r++) if(grid[r][centerCol]===piece) centerCount++;
   score += centerCount * 3;
 
+  // horizontal
   for(let r=0;r<C4_ROWS;r++){
     const rowArr = grid[r];
     for(let c=0;c<=C4_COLS-4;c++){
       score += c4EvalWindow(rowArr.slice(c,c+4), piece);
     }
   }
+  // vertical
   for(let c=0;c<C4_COLS;c++){
     const colArr = [];
     for(let r=0;r<C4_ROWS;r++) colArr.push(grid[r][c]);
@@ -838,12 +851,14 @@ function c4ScorePosition(grid, piece){
       score += c4EvalWindow(colArr.slice(r,r+4), piece);
     }
   }
+  // diag down-right
   for(let r=0;r<=C4_ROWS-4;r++){
     for(let c=0;c<=C4_COLS-4;c++){
       const w = [grid[r][c], grid[r+1][c+1], grid[r+2][c+2], grid[r+3][c+3]];
       score += c4EvalWindow(w, piece);
     }
   }
+  // diag up-right
   for(let r=3;r<C4_ROWS;r++){
     for(let c=0;c<=C4_COLS-4;c++){
       const w = [grid[r][c], grid[r-1][c+1], grid[r-2][c+2], grid[r-3][c+3]];
@@ -865,7 +880,7 @@ function c4Minimax(grid, depth, alpha, beta, maximizing){
     if(terminal){
       if(c4Winner(grid,2)) return [null, 1000000];
       if(c4Winner(grid,1)) return [null, -1000000];
-      return [null, 0];
+      return [null, 0]; // full board
     }
     return [null, c4ScorePosition(grid, 2)];
   }
@@ -903,21 +918,17 @@ function c4BestMove(grid, depth){
   return c4Minimax(grid, depth, -Infinity, Infinity, true);
 }
 
-let marioLoaded = false;
-
+/* =========================================================
+   SUPER MARIO 64 EMBED
+   ========================================================= */
 function renderMario(){
   modalBody.innerHTML = `
     <h3 class="modal-title">Super Mario 64</h3>
-    <p class="modal-sub">Local build. Click inside the game canvas to give it keyboard focus.</p>
+    <p class="modal-sub">Loaded from an external fan-hosted build. Click inside the game to give it keyboard focus.</p>
     <div class="mario-layout">
       <div class="mario-frame-wrap">
-        <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
-        <div id="marioLoadStatus" class="mario-fallback">Loading sm64.js…</div>
-        <div class="volume-row">
-          <span>&#128266;</span>
-          <input type="range" id="marioVolume" min="0" max="100" value="80">
-          <span id="marioVolumeVal">80%</span>
-        </div>
+        <iframe id="marioFrame" src="https://supermario64free.github.io/super-mario-64/" allow="autoplay; fullscreen; gamepad; pointer-lock; keyboard-map" allowfullscreen tabindex="0"></iframe>
+        <p class="mario-fallback">If the game doesn't load here, <a href="https://supermario64free.github.io/super-mario-64/" target="_blank" rel="noopener">open it in a new tab instead</a>.</p>
       </div>
       <div class="controls-panel">
         <h4>Movement &amp; Actions</h4>
@@ -945,89 +956,6 @@ function renderMario(){
       </div>
     </div>
   `;
-
-  loadMarioGame();
-}
-
-function loadMarioGame(){
-  const statusEl = document.getElementById('marioLoadStatus');
-  const canvas = document.getElementById('canvas');
-
-  // Emscripten-style module config. sm64.js (from an Emscripten build)
-  // typically reads window.Module and attaches itself to the canvas below.
-  window.Module = window.Module || {};
-  window.Module.canvas = canvas;
-  window.Module.print = (function(){
-    return function(text){ console.log('[sm64]', text); };
-  })();
-  window.Module.printErr = function(text){ console.error('[sm64]', text); };
-  window.Module.setStatus = function(text){
-    if(statusEl) statusEl.textContent = text || 'Running.';
-  };
-  window.Module.onRuntimeInitialized = function(){
-    if(statusEl) statusEl.textContent = 'Running.';
-    marioLoaded = true;
-  };
-
-  if(marioLoaded){
-    // Already initialized once this page session — most Emscripten builds
-    // can't be cleanly re-initialized into a fresh canvas without a reload.
-    if(statusEl) statusEl.textContent = 'Already running from earlier — reopen the page for a clean restart if the screen is blank.';
-    return;
-  }
-
-  const script = document.createElement('script');
-  script.src = './sm64.js';
-  script.onerror = function(){
-    if(statusEl) statusEl.textContent = 'Could not find ./sm64.js next to this HTML file. Check the path/filename.';
-  };
-  document.body.appendChild(script);
-
-  const volSlider = document.getElementById('marioVolume');
-  const volLabel = document.getElementById('marioVolumeVal');
-  if(volSlider){
-    volSlider.addEventListener('input', ()=>{
-      const pct = Number(volSlider.value);
-      if(volLabel) volLabel.textContent = pct + '%';
-      applyMarioVolume(pct / 100);
-    });
-    // apply the default once audio is likely up
-    applyMarioVolume(Number(volSlider.value) / 100);
-  }
-}
-
-function applyMarioVolume(vol){
-  // vol is 0.0 - 1.0. Different Emscripten/SDL builds expose audio
-  // differently, so we try the common ones and fall back gracefully.
-  let applied = false;
-
-  // 1) A build-specific helper, if sm64.js defines one.
-  if(window.Module && typeof window.Module.setVolume === 'function'){
-    try{ window.Module.setVolume(vol); applied = true; }catch(e){}
-  }
-
-  // 2) SDL2 builds sometimes expose their WebAudio context/gain node.
-  if(!applied && window.Module){
-    const ctxCandidates = [window.Module.SDL2audioContext, window.Module.audioContext, window.SDL2 && window.SDL2.audioContext];
-    for(const ctx of ctxCandidates){
-      if(ctx && ctx.gainNode){
-        try{ ctx.gainNode.gain.value = vol; applied = true; break; }catch(e){}
-      }
-    }
-  }
-
-  // 3) Fallback: any <audio>/<video> elements the build may have created.
-  if(!applied){
-    const mediaEls = document.querySelectorAll('audio, video');
-    if(mediaEls.length){
-      mediaEls.forEach(el => { el.volume = vol; });
-      applied = true;
-    }
-  }
-
-  if(!applied){
-    console.warn('[sm64] No known audio hook found for volume control — tell Claude the actual API sm64.js exposes (e.g. window.Module.xyz) and this can be wired up properly.');
-  }
 }
 </script>
 </body>
